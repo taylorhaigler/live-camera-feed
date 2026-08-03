@@ -587,14 +587,14 @@
   }
 
   function drawFlowerCrown(ctx, cx, cy, faceWidthPx, angle) {
-    const flowers = ['🌸', '🌼', '🌺', '🌷', '🌻', '🌷', '🌸'];
-    const radius = faceWidthPx * 0.62;
-    const fontSize = Math.max(14, faceWidthPx * 0.24);
-    const arcSpan = Math.PI * 0.62;
+    const flowers = ['🌸', '🌸', '🌸', '🌸', '🌸', '🌸', '🌸'];
+    const radius = faceWidthPx * 0.42;
+    const fontSize = Math.max(14, faceWidthPx * 0.22);
+    const arcSpan = Math.PI * 0.56;
     const startAngle = -Math.PI / 2 - arcSpan / 2;
 
     ctx.save();
-    ctx.translate(cx, cy - faceWidthPx * 0.08);
+    ctx.translate(cx, cy + faceWidthPx * 0.02);
     ctx.rotate(angle);
 
     ctx.strokeStyle = 'rgba(63,125,58,0.9)';
