@@ -202,6 +202,13 @@
   button.primary:hover:not(:disabled) {
     background: #4a80f0;
   }
+  button.active {
+    background: #2f6fed;
+    border-color: #2f6fed;
+  }
+  button.active:hover:not(:disabled) {
+    background: #4a80f0;
+  }
   button.danger {
     background: #3a1f1f;
     border-color: #5a2a2a;
@@ -341,6 +348,7 @@
 
     <div class="stage" id="stage">
       <video id="video" autoplay playsinline muted></video>
+      <canvas id="crownCanvas" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;"></canvas>
       <div class="placeholder" id="placeholder">
         <div>📷</div>
         <div>Camera is off. Click "Start Camera" to go live.</div>
@@ -360,6 +368,7 @@
       <button id="rotateBtn" disabled>⟳ Rotate</button>
       <button id="adjustBtn" disabled>🎨 Colors</button>
       <button id="mixBtn" disabled>🔀 Mix Cameras</button>
+      <button id="crownBtn" disabled>👑 Flower Crown</button>
       <div class="spacer"></div>
       <span class="status" id="status"></span>
     </div>
@@ -476,6 +485,9 @@
   const mixCancelBtn = document.getElementById('mixCancelBtn');
   const mixSaveBtn = document.getElementById('mixSaveBtn');
 
+  const crownBtn = document.getElementById('crownBtn');
+  const crownCanvas = document.getElementById('crownCanvas');
+
   let currentStream = null;
   let clockInterval = null;
   let currentFacingMode = 'user';
@@ -483,6 +495,11 @@
   let rotation = 0;
   let filterState = { brightness: 100, contrast: 100, saturate: 100, hue: 0, grayscale: 0, sepia: 0, invert: 0 };
   let mixShots = { front: null, back: null };
+
+  let crownEnabled = false;
+  let crownRafId = null;
+  let faceLandmarker = null;
+  let faceLandmarkerLoading = null;
 
   const FILTER_PRESETS = {
     normal:    { brightness: 100, contrast: 100, saturate: 100, hue: 0,   grayscale: 0,   sepia: 0,   invert: 0 },
@@ -511,17 +528,170 @@
     fullscreenBtn.disabled = !isLive;
     rotateBtn.disabled = !isLive;
     adjustBtn.disabled = !isLive;
+    crownBtn.disabled = !isLive;
     cameraSelect.disabled = !isLive || !multipleCamerasAvailable;
     updateMixBtnState();
     if (!isLive) {
       exitFullscreenMode();
       adjustPanel.classList.remove('open');
+      stopCrownLoop();
+    } else if (crownEnabled) {
+      resizeCrownCanvas();
+      if (!crownRafId) crownRafId = requestAnimationFrame(crownLoop);
     }
   }
 
   function updateMixBtnState() {
     mixBtn.disabled = !currentStream || !multipleCamerasAvailable;
   }
+
+  // --- Flower crown face tracking ---
+  // Loads Google's MediaPipe FaceLandmarker model on first use (lazily, from
+  // their CDN) so the app stays a single static HTML file with no build step.
+  async function ensureFaceLandmarker() {
+    if (faceLandmarker) return faceLandmarker;
+    if (faceLandmarkerLoading) return faceLandmarkerLoading;
+    faceLandmarkerLoading = (async () => {
+      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+      const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+      faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU'
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1
+      });
+      return faceLandmarker;
+    })();
+    return faceLandmarkerLoading;
+  }
+
+  function resizeCrownCanvas() {
+    const rect = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    crownCanvas.width = Math.max(1, Math.round(rect.width * dpr));
+    crownCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+  }
+
+  // reproduces the video element's object-fit mapping so landmark coordinates
+  // (normalized to the raw video frame) line up with what's actually displayed
+  function computeVideoMapping(canvasW, canvasH, videoW, videoH, fit) {
+    const scaleX = canvasW / videoW;
+    const scaleY = canvasH / videoH;
+    const scale = fit === 'contain' ? Math.min(scaleX, scaleY) : Math.max(scaleX, scaleY);
+    return { scale, offsetX: (canvasW - videoW * scale) / 2, offsetY: (canvasH - videoH * scale) / 2 };
+  }
+
+  function drawFlowerCrown(ctx, cx, cy, faceWidthPx, angle) {
+    const flowers = ['🌸', '🌼', '🌺', '🌷', '🌻', '🌷', '🌸'];
+    const radius = faceWidthPx * 0.62;
+    const fontSize = Math.max(14, faceWidthPx * 0.24);
+    const arcSpan = Math.PI * 0.62;
+    const startAngle = -Math.PI / 2 - arcSpan / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy - faceWidthPx * 0.08);
+    ctx.rotate(angle);
+
+    ctx.strokeStyle = 'rgba(63,125,58,0.9)';
+    ctx.lineWidth = Math.max(2, faceWidthPx * 0.02);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, startAngle, startAngle + arcSpan);
+    ctx.stroke();
+
+    ctx.font = `${fontSize}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    flowers.forEach((flower, i) => {
+      const t = i / (flowers.length - 1);
+      const a = startAngle + t * arcSpan;
+      const fx = Math.cos(a) * radius;
+      const fy = Math.sin(a) * radius;
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.fillText(flower, 0, 0);
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
+  function crownLoop(now) {
+    if (!crownEnabled || !currentStream) {
+      crownRafId = null;
+      return;
+    }
+    const ctx = crownCanvas.getContext('2d');
+    ctx.clearRect(0, 0, crownCanvas.width, crownCanvas.height);
+    try {
+      const result = faceLandmarker.detectForVideo(video, now);
+      if (result.faceLandmarks && result.faceLandmarks.length) {
+        const lm = result.faceLandmarks[0];
+        const fit = getComputedStyle(video).objectFit;
+        const { scale, offsetX, offsetY } = computeVideoMapping(
+          crownCanvas.width,
+          crownCanvas.height,
+          video.videoWidth,
+          video.videoHeight,
+          fit
+        );
+        const toPoint = (p) => ({
+          x: p.x * video.videoWidth * scale + offsetX,
+          y: p.y * video.videoHeight * scale + offsetY
+        });
+        const forehead = toPoint(lm[10]);
+        const leftEdge = toPoint(lm[234]);
+        const rightEdge = toPoint(lm[454]);
+        const leftEye = toPoint(lm[33]);
+        const rightEye = toPoint(lm[263]);
+        const faceWidthPx = Math.hypot(rightEdge.x - leftEdge.x, rightEdge.y - leftEdge.y);
+        const angle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+        drawFlowerCrown(ctx, forehead.x, forehead.y, faceWidthPx, angle);
+      }
+    } catch (err) {
+      // transient detection hiccups shouldn't kill the loop
+    }
+    crownRafId = requestAnimationFrame(crownLoop);
+  }
+
+  function stopCrownLoop() {
+    if (crownRafId) {
+      cancelAnimationFrame(crownRafId);
+      crownRafId = null;
+    }
+    crownCanvas.getContext('2d').clearRect(0, 0, crownCanvas.width, crownCanvas.height);
+  }
+
+  async function toggleCrown() {
+    if (crownEnabled) {
+      crownEnabled = false;
+      crownBtn.classList.remove('active');
+      stopCrownLoop();
+      return;
+    }
+    crownBtn.disabled = true;
+    setStatus('Loading face tracking… (first time may take a few seconds)');
+    try {
+      await ensureFaceLandmarker();
+      crownEnabled = true;
+      crownBtn.classList.add('active');
+      resizeCrownCanvas();
+      setStatus('Live');
+      if (!crownRafId) crownRafId = requestAnimationFrame(crownLoop);
+    } catch (err) {
+      setStatus(`Flower crown unavailable: ${err.message}`, true);
+    } finally {
+      crownBtn.disabled = !currentStream;
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    if (currentStream) resizeCrownCanvas();
+  });
 
   function buildFilterCss() {
     const f = filterState;
@@ -531,7 +701,11 @@
   function applyLiveTransforms() {
     video.style.filter = buildFilterCss();
     const mirror = video.classList.contains('mirror');
-    video.style.transform = `${mirror ? 'scaleX(-1) ' : ''}rotate(${rotation}deg)`;
+    const transform = `${mirror ? 'scaleX(-1) ' : ''}rotate(${rotation}deg)`;
+    video.style.transform = transform;
+    // the crown canvas draws in raw (unmirrored) video coordinate space, so it
+    // needs the same mirror/rotation applied to line up with the display
+    crownCanvas.style.transform = transform;
   }
 
   function refreshFilterUI() {
@@ -635,6 +809,7 @@
     } else if (stage.webkitRequestFullscreen) {
       try { stage.webkitRequestFullscreen(); } catch (err) { /* fall back to CSS-only fullscreen */ }
     }
+    if (currentStream) requestAnimationFrame(resizeCrownCanvas);
   }
 
   function exitFullscreenMode() {
@@ -644,10 +819,12 @@
     } else if (document.webkitFullscreenElement) {
       document.webkitExitFullscreen();
     }
+    if (currentStream) requestAnimationFrame(resizeCrownCanvas);
   }
 
   document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement) document.body.classList.remove('fs-mode');
+    if (currentStream) requestAnimationFrame(resizeCrownCanvas);
   });
 
   function tickClock() {
@@ -844,6 +1021,8 @@
   document.querySelectorAll('#adjustPanel .preset-row button[data-preset]').forEach((btn) => {
     btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
   });
+
+  crownBtn.addEventListener('click', toggleCrown);
 
   mixBtn.addEventListener('click', startMixFlow);
   mixCancelBtn.addEventListener('click', () => mixOverlay.classList.add('hidden'));
