@@ -65,7 +65,9 @@
     height: 100%;
     object-fit: cover;
     display: block;
-    transform: scaleX(-1); /* mirror, feels natural for front camera */
+  }
+  video.mirror {
+    transform: scaleX(-1); /* mirror the front camera so it feels natural */
   }
   .placeholder {
     position: absolute;
@@ -199,6 +201,7 @@
     <div class="controls">
       <button class="primary" id="startBtn">Start Camera</button>
       <button class="danger" id="stopBtn" disabled>Stop</button>
+      <button id="flipBtn" disabled>🔄 Flip Camera</button>
       <select id="cameraSelect" disabled></select>
       <button id="snapBtn" disabled>📸 Snapshot</button>
       <div class="spacer"></div>
@@ -221,6 +224,7 @@
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const snapBtn = document.getElementById('snapBtn');
+  const flipBtn = document.getElementById('flipBtn');
   const cameraSelect = document.getElementById('cameraSelect');
   const statusEl = document.getElementById('status');
   const liveDot = document.getElementById('liveDot');
@@ -231,6 +235,8 @@
 
   let currentStream = null;
   let clockInterval = null;
+  let currentFacingMode = 'user';
+  let multipleCamerasAvailable = false;
 
   function setStatus(msg, isError = false) {
     statusEl.textContent = msg;
@@ -245,7 +251,8 @@
     startBtn.disabled = isLive;
     stopBtn.disabled = !isLive;
     snapBtn.disabled = !isLive;
-    cameraSelect.disabled = !isLive && cameraSelect.options.length === 0;
+    flipBtn.disabled = !isLive;
+    cameraSelect.disabled = !isLive || !multipleCamerasAvailable;
   }
 
   function tickClock() {
@@ -263,24 +270,32 @@
         opt.textContent = cam.label || `Camera ${i + 1}`;
         cameraSelect.appendChild(opt);
       });
-      cameraSelect.disabled = cams.length <= 1;
+      multipleCamerasAvailable = cams.length > 1;
+      cameraSelect.disabled = !currentStream || !multipleCamerasAvailable;
     } catch (err) {
       // enumeration can fail silently before permission is granted; not fatal
     }
   }
 
-  async function startCamera(deviceId) {
+  async function startCamera(deviceId, facingMode) {
     stopCamera();
     setStatus('Requesting camera access…');
     try {
       const constraints = {
-        video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
+        video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: facingMode || currentFacingMode },
         audio: false
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       currentStream = stream;
       video.srcObject = stream;
       await video.play();
+
+      // infer facing mode from the actual track when possible (deviceId-based
+      // requests don't echo back the facingMode we asked for)
+      const trackSettings = stream.getVideoTracks()[0]?.getSettings() || {};
+      currentFacingMode = trackSettings.facingMode || facingMode || currentFacingMode;
+      video.classList.toggle('mirror', currentFacingMode !== 'environment');
+
       setLiveUI(true);
       setStatus('Live');
       clockInterval = setInterval(tickClock, 1000);
@@ -318,9 +333,11 @@
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
-    // mirror the snapshot to match what's displayed
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
+    if (video.classList.contains('mirror')) {
+      // mirror the snapshot to match what's displayed
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
 
@@ -339,6 +356,10 @@
   startBtn.addEventListener('click', () => startCamera(cameraSelect.value || undefined));
   stopBtn.addEventListener('click', stopCamera);
   snapBtn.addEventListener('click', takeSnapshot);
+  flipBtn.addEventListener('click', () => {
+    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+    startCamera(undefined, currentFacingMode);
+  });
   cameraSelect.addEventListener('change', () => {
     if (currentStream) startCamera(cameraSelect.value);
   });
