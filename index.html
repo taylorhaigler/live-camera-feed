@@ -400,8 +400,11 @@
 
     <div>
       <div class="snap-row-header">
-        <h2>Snapshots</h2>
-        <a href="#" class="link-btn" id="clearSnaps">Clear all</a>
+        <h2>Snapshots <span style="font-weight:400; color:#8b8d96;">(tap a photo to save it)</span></h2>
+        <div style="display:flex; gap:14px;">
+          <a href="#" class="link-btn" id="saveAllBtn">Save all to Photos</a>
+          <a href="#" class="link-btn" id="clearSnaps">Clear all</a>
+        </div>
       </div>
       <div class="snapshots" id="snapshots"></div>
     </div>
@@ -447,6 +450,7 @@
   const clockEl = document.getElementById('clock');
   const snapshotsEl = document.getElementById('snapshots');
   const clearSnapsBtn = document.getElementById('clearSnaps');
+  const saveAllBtn = document.getElementById('saveAllBtn');
 
   const rotateBtn = document.getElementById('rotateBtn');
   const adjustBtn = document.getElementById('adjustBtn');
@@ -581,15 +585,45 @@
     return canvas;
   }
 
+  function dataUrlToFile(dataUrl, filename) {
+    const [header, base64] = dataUrl.split(',');
+    const mime = (header.match(/data:(.*);base64/) || [, 'image/png'])[1];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new File([bytes], filename, { type: mime });
+  }
+
+  function downloadFile(file) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  // tries the native share sheet first (one tap -> "Save Image" -> Photos on iOS);
+  // falls back to a plain download for browsers without file-sharing support
+  async function shareOrDownload(files, title) {
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try {
+        await navigator.share({ files, title });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return; // user dismissed the share sheet
+      }
+    }
+    files.forEach((file, i) => setTimeout(() => downloadFile(file), i * 300));
+  }
+
   function addSnapshot(dataUrl) {
     const img = document.createElement('img');
     img.src = dataUrl;
     img.title = new Date().toLocaleString();
     img.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `snapshot-${Date.now()}.png`;
-      a.click();
+      const file = dataUrlToFile(dataUrl, `snapshot-${Date.now()}.png`);
+      shareOrDownload([file], 'Camera Snapshot');
     });
     snapshotsEl.prepend(img);
   }
@@ -788,6 +822,17 @@
   clearSnapsBtn.addEventListener('click', (e) => {
     e.preventDefault();
     snapshotsEl.innerHTML = '';
+  });
+  saveAllBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const imgs = Array.from(snapshotsEl.querySelectorAll('img'));
+    if (!imgs.length) {
+      setStatus('No snapshots to save yet.');
+      return;
+    }
+    const files = imgs.map((img, i) => dataUrlToFile(img.src, `snapshot-${Date.now()}-${i}.png`));
+    setStatus(`Saving ${files.length} photo${files.length > 1 ? 's' : ''}…`);
+    shareOrDownload(files, 'Camera Snapshots');
   });
 
   rotateBtn.addEventListener('click', cycleRotation);
