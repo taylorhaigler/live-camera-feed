@@ -500,6 +500,7 @@
   let crownRafId = null;
   let faceLandmarker = null;
   let faceLandmarkerLoading = null;
+  let lastFaceLandmarks = null;
 
   const FILTER_PRESETS = {
     normal:    { brightness: 100, contrast: 100, saturate: 100, hue: 0,   grayscale: 0,   sepia: 0,   invert: 0 },
@@ -629,8 +630,9 @@
     ctx.clearRect(0, 0, crownCanvas.width, crownCanvas.height);
     try {
       const result = faceLandmarker.detectForVideo(video, now);
-      if (result.faceLandmarks && result.faceLandmarks.length) {
-        const lm = result.faceLandmarks[0];
+      lastFaceLandmarks = result.faceLandmarks && result.faceLandmarks.length ? result.faceLandmarks[0] : null;
+      if (lastFaceLandmarks) {
+        const lm = lastFaceLandmarks;
         const fit = getComputedStyle(video).objectFit;
         const { scale, offsetX, offsetY } = computeVideoMapping(
           crownCanvas.width,
@@ -663,6 +665,7 @@
       cancelAnimationFrame(crownRafId);
       crownRafId = null;
     }
+    lastFaceLandmarks = null;
     crownCanvas.getContext('2d').clearRect(0, 0, crownCanvas.width, crownCanvas.height);
   }
 
@@ -755,6 +758,23 @@
     ctx.rotate((rotationDeg * Math.PI) / 180);
     if (mirrored) ctx.scale(-1, 1);
     ctx.drawImage(sourceVideo, -vw / 2, -vh / 2, vw, vh);
+
+    if (crownEnabled && lastFaceLandmarks) {
+      // draw in the same (still-mirrored/rotated) transform as the video frame,
+      // using raw video-native coordinates so it lines up with the live overlay
+      ctx.filter = 'none';
+      const lm = lastFaceLandmarks;
+      const toLocal = (p) => ({ x: p.x * vw - vw / 2, y: p.y * vh - vh / 2 });
+      const forehead = toLocal(lm[10]);
+      const leftEdge = toLocal(lm[234]);
+      const rightEdge = toLocal(lm[454]);
+      const leftEye = toLocal(lm[33]);
+      const rightEye = toLocal(lm[263]);
+      const faceWidthPx = Math.hypot(rightEdge.x - leftEdge.x, rightEdge.y - leftEdge.y);
+      const faceAngle = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+      drawFlowerCrown(ctx, forehead.x, forehead.y, faceWidthPx, faceAngle);
+    }
+
     ctx.restore();
     return canvas;
   }
