@@ -245,6 +245,94 @@
     text-decoration: none;
   }
   a.link-btn:hover { color: #e8e8ec; }
+
+  .panel {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    background: #15161b;
+    border: 1px solid #23242a;
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .panel.open { display: flex; }
+  .preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .preset-row button {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+  }
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .slider-row label {
+    width: 90px;
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    color: #b7b9c2;
+  }
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: #2f6fed;
+  }
+  .slider-row .value {
+    width: 46px;
+    flex-shrink: 0;
+    text-align: right;
+    font-size: 0.8rem;
+    color: #8b8d96;
+    font-variant-numeric: tabular-nums;
+  }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 20px;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: #15161b;
+    border: 1px solid #23242a;
+    border-radius: 16px;
+    padding: 20px;
+    width: min(560px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .mix-canvas-wrap {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .mix-canvas-wrap canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
 </style>
 </head>
 <body>
@@ -269,8 +357,45 @@
       <select id="cameraSelect" disabled></select>
       <button id="snapBtn" disabled>📸 Snapshot</button>
       <button id="fullscreenBtn" disabled>⛶ Fullscreen</button>
+      <button id="rotateBtn" disabled>⟳ Rotate</button>
+      <button id="adjustBtn" disabled>🎨 Colors</button>
+      <button id="mixBtn" disabled>🔀 Mix Cameras</button>
       <div class="spacer"></div>
       <span class="status" id="status"></span>
+    </div>
+
+    <div class="panel" id="adjustPanel">
+      <div class="preset-row">
+        <button data-preset="normal">Normal</button>
+        <button data-preset="grayscale">Grayscale</button>
+        <button data-preset="sepia">Sepia</button>
+        <button data-preset="invert">Invert</button>
+        <button data-preset="vivid">Vivid</button>
+        <button data-preset="warm">Warm</button>
+        <button data-preset="cool">Cool</button>
+        <div class="spacer"></div>
+        <button id="resetFiltersBtn">Reset</button>
+      </div>
+      <div class="slider-row">
+        <label for="brightnessSlider">Brightness</label>
+        <input type="range" id="brightnessSlider" min="50" max="150" value="100">
+        <span class="value" id="brightnessValue">100%</span>
+      </div>
+      <div class="slider-row">
+        <label for="contrastSlider">Contrast</label>
+        <input type="range" id="contrastSlider" min="50" max="150" value="100">
+        <span class="value" id="contrastValue">100%</span>
+      </div>
+      <div class="slider-row">
+        <label for="saturateSlider">Saturation</label>
+        <input type="range" id="saturateSlider" min="0" max="200" value="100">
+        <span class="value" id="saturateValue">100%</span>
+      </div>
+      <div class="slider-row">
+        <label for="hueSlider">Hue</label>
+        <input type="range" id="hueSlider" min="-180" max="180" value="0">
+        <span class="value" id="hueValue">0°</span>
+      </div>
     </div>
 
     <div>
@@ -279,6 +404,28 @@
         <a href="#" class="link-btn" id="clearSnaps">Clear all</a>
       </div>
       <div class="snapshots" id="snapshots"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="mixOverlay">
+    <div class="modal">
+      <h3>Mix Front &amp; Back Camera</h3>
+      <div class="status" id="mixStatus">Capturing…</div>
+      <div class="mix-canvas-wrap"><canvas id="mixCanvas"></canvas></div>
+      <select id="mixLayoutSelect" style="display:none;">
+        <option value="crossfade">Crossfade</option>
+        <option value="sidebyside">Side by Side</option>
+        <option value="pip">Picture-in-Picture</option>
+      </select>
+      <div class="slider-row" id="mixBlendRow" style="display:none;">
+        <label for="mixBlendSlider">Blend</label>
+        <input type="range" id="mixBlendSlider" min="0" max="100" value="50">
+        <span class="value" id="mixBlendValue">50%</span>
+      </div>
+      <div class="modal-actions">
+        <button id="mixCancelBtn">Cancel</button>
+        <button class="primary" id="mixSaveBtn" style="display:none;">Save to Snapshots</button>
+      </div>
     </div>
   </div>
 
@@ -301,10 +448,47 @@
   const snapshotsEl = document.getElementById('snapshots');
   const clearSnapsBtn = document.getElementById('clearSnaps');
 
+  const rotateBtn = document.getElementById('rotateBtn');
+  const adjustBtn = document.getElementById('adjustBtn');
+  const adjustPanel = document.getElementById('adjustPanel');
+  const resetFiltersBtn = document.getElementById('resetFiltersBtn');
+  const brightnessSlider = document.getElementById('brightnessSlider');
+  const contrastSlider = document.getElementById('contrastSlider');
+  const saturateSlider = document.getElementById('saturateSlider');
+  const hueSlider = document.getElementById('hueSlider');
+  const brightnessValue = document.getElementById('brightnessValue');
+  const contrastValue = document.getElementById('contrastValue');
+  const saturateValue = document.getElementById('saturateValue');
+  const hueValue = document.getElementById('hueValue');
+
+  const mixBtn = document.getElementById('mixBtn');
+  const mixOverlay = document.getElementById('mixOverlay');
+  const mixStatus = document.getElementById('mixStatus');
+  const mixCanvas = document.getElementById('mixCanvas');
+  const mixLayoutSelect = document.getElementById('mixLayoutSelect');
+  const mixBlendRow = document.getElementById('mixBlendRow');
+  const mixBlendSlider = document.getElementById('mixBlendSlider');
+  const mixBlendValue = document.getElementById('mixBlendValue');
+  const mixCancelBtn = document.getElementById('mixCancelBtn');
+  const mixSaveBtn = document.getElementById('mixSaveBtn');
+
   let currentStream = null;
   let clockInterval = null;
   let currentFacingMode = 'user';
   let multipleCamerasAvailable = false;
+  let rotation = 0;
+  let filterState = { brightness: 100, contrast: 100, saturate: 100, hue: 0, grayscale: 0, sepia: 0, invert: 0 };
+  let mixShots = { front: null, back: null };
+
+  const FILTER_PRESETS = {
+    normal:    { brightness: 100, contrast: 100, saturate: 100, hue: 0,   grayscale: 0,   sepia: 0,   invert: 0 },
+    grayscale: { brightness: 105, contrast: 110, saturate: 100, hue: 0,   grayscale: 100, sepia: 0,   invert: 0 },
+    sepia:     { brightness: 100, contrast: 100, saturate: 100, hue: 0,   grayscale: 0,   sepia: 100, invert: 0 },
+    invert:    { brightness: 100, contrast: 100, saturate: 100, hue: 0,   grayscale: 0,   sepia: 0,   invert: 100 },
+    vivid:     { brightness: 105, contrast: 115, saturate: 160, hue: 0,   grayscale: 0,   sepia: 0,   invert: 0 },
+    warm:      { brightness: 105, contrast: 105, saturate: 120, hue: -12, grayscale: 0,   sepia: 12,  invert: 0 },
+    cool:      { brightness: 100, contrast: 108, saturate: 110, hue: 15,  grayscale: 0,   sepia: 0,   invert: 0 }
+  };
 
   function setStatus(msg, isError = false) {
     statusEl.textContent = msg;
@@ -321,8 +505,93 @@
     snapBtn.disabled = !isLive;
     flipBtn.disabled = !isLive;
     fullscreenBtn.disabled = !isLive;
+    rotateBtn.disabled = !isLive;
+    adjustBtn.disabled = !isLive;
     cameraSelect.disabled = !isLive || !multipleCamerasAvailable;
-    if (!isLive) exitFullscreenMode();
+    updateMixBtnState();
+    if (!isLive) {
+      exitFullscreenMode();
+      adjustPanel.classList.remove('open');
+    }
+  }
+
+  function updateMixBtnState() {
+    mixBtn.disabled = !currentStream || !multipleCamerasAvailable;
+  }
+
+  function buildFilterCss() {
+    const f = filterState;
+    return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%) hue-rotate(${f.hue}deg) grayscale(${f.grayscale}%) sepia(${f.sepia}%) invert(${f.invert}%)`;
+  }
+
+  function applyLiveTransforms() {
+    video.style.filter = buildFilterCss();
+    const mirror = video.classList.contains('mirror');
+    video.style.transform = `${mirror ? 'scaleX(-1) ' : ''}rotate(${rotation}deg)`;
+  }
+
+  function refreshFilterUI() {
+    brightnessSlider.value = filterState.brightness;
+    contrastSlider.value = filterState.contrast;
+    saturateSlider.value = filterState.saturate;
+    hueSlider.value = filterState.hue;
+    brightnessValue.textContent = filterState.brightness + '%';
+    contrastValue.textContent = filterState.contrast + '%';
+    saturateValue.textContent = filterState.saturate + '%';
+    hueValue.textContent = filterState.hue + '°';
+  }
+
+  function onFilterSliderInput() {
+    filterState.brightness = Number(brightnessSlider.value);
+    filterState.contrast = Number(contrastSlider.value);
+    filterState.saturate = Number(saturateSlider.value);
+    filterState.hue = Number(hueSlider.value);
+    brightnessValue.textContent = filterState.brightness + '%';
+    contrastValue.textContent = filterState.contrast + '%';
+    saturateValue.textContent = filterState.saturate + '%';
+    hueValue.textContent = filterState.hue + '°';
+    applyLiveTransforms();
+  }
+
+  function applyPreset(name) {
+    const preset = FILTER_PRESETS[name];
+    if (!preset) return;
+    filterState = { ...preset };
+    refreshFilterUI();
+    applyLiveTransforms();
+  }
+
+  // draws a video frame onto a new canvas, applying mirror/rotation/filter
+  // so snapshots and camera-mix captures match what's shown on screen
+  function drawFrameToCanvas(sourceVideo, mirrored, rotationDeg, filterCss) {
+    const vw = sourceVideo.videoWidth;
+    const vh = sourceVideo.videoHeight;
+    const swapped = rotationDeg === 90 || rotationDeg === 270;
+    const canvas = document.createElement('canvas');
+    canvas.width = swapped ? vh : vw;
+    canvas.height = swapped ? vw : vh;
+    const ctx = canvas.getContext('2d');
+    if (filterCss) ctx.filter = filterCss;
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((rotationDeg * Math.PI) / 180);
+    if (mirrored) ctx.scale(-1, 1);
+    ctx.drawImage(sourceVideo, -vw / 2, -vh / 2, vw, vh);
+    ctx.restore();
+    return canvas;
+  }
+
+  function addSnapshot(dataUrl) {
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.title = new Date().toLocaleString();
+    img.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `snapshot-${Date.now()}.png`;
+      a.click();
+    });
+    snapshotsEl.prepend(img);
   }
 
   async function enterFullscreenMode() {
@@ -364,6 +633,7 @@
       });
       multipleCamerasAvailable = cams.length > 1;
       cameraSelect.disabled = !currentStream || !multipleCamerasAvailable;
+      updateMixBtnState();
     } catch (err) {
       // enumeration can fail silently before permission is granted; not fatal
     }
@@ -387,6 +657,7 @@
       const trackSettings = stream.getVideoTracks()[0]?.getSettings() || {};
       currentFacingMode = trackSettings.facingMode || facingMode || currentFacingMode;
       video.classList.toggle('mirror', currentFacingMode !== 'environment');
+      applyLiveTransforms();
 
       setLiveUI(true);
       setStatus('Live');
@@ -421,28 +692,85 @@
 
   function takeSnapshot() {
     if (!currentStream) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (video.classList.contains('mirror')) {
-      // mirror the snapshot to match what's displayed
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-    }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/png');
+    const canvas = drawFrameToCanvas(video, video.classList.contains('mirror'), rotation, buildFilterCss());
+    addSnapshot(canvas.toDataURL('image/png'));
+  }
 
-    const img = document.createElement('img');
-    img.src = dataUrl;
-    img.title = new Date().toLocaleString();
-    img.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `snapshot-${Date.now()}.png`;
-      a.click();
-    });
-    snapshotsEl.prepend(img);
+  function cycleRotation() {
+    rotation = (rotation + 90) % 360;
+    applyLiveTransforms();
+  }
+
+  function renderMixPreview() {
+    if (!mixShots.front || !mixShots.back) return;
+    const w = Math.max(mixShots.front.width, mixShots.back.width);
+    const h = Math.max(mixShots.front.height, mixShots.back.height);
+    mixCanvas.width = w;
+    mixCanvas.height = h;
+    const ctx = mixCanvas.getContext('2d');
+    const layout = mixLayoutSelect.value;
+    const blend = Number(mixBlendSlider.value) / 100;
+
+    ctx.clearRect(0, 0, w, h);
+    if (layout === 'sidebyside') {
+      ctx.drawImage(mixShots.front, 0, 0, w / 2, h);
+      ctx.drawImage(mixShots.back, w / 2, 0, w / 2, h);
+    } else if (layout === 'pip') {
+      ctx.drawImage(mixShots.back, 0, 0, w, h);
+      const pipW = w * 0.32, pipH = h * 0.32, margin = w * 0.03;
+      ctx.drawImage(mixShots.front, w - pipW - margin, h - pipH - margin, pipW, pipH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(w - pipW - margin, h - pipH - margin, pipW, pipH);
+    } else {
+      ctx.globalAlpha = 1 - blend;
+      ctx.drawImage(mixShots.front, 0, 0, w, h);
+      ctx.globalAlpha = blend;
+      ctx.drawImage(mixShots.back, 0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  async function startMixFlow() {
+    if (!currentStream || !multipleCamerasAvailable) return;
+    mixOverlay.classList.remove('hidden');
+    mixSaveBtn.style.display = 'none';
+    mixLayoutSelect.style.display = 'none';
+    mixBlendRow.style.display = 'none';
+    mixCanvas.getContext('2d').clearRect(0, 0, mixCanvas.width, mixCanvas.height);
+    mixShots = { front: null, back: null };
+
+    const originalFacingMode = currentFacingMode;
+
+    try {
+      const firstLabel = currentFacingMode === 'environment' ? 'back' : 'front';
+      mixStatus.textContent = `Capturing ${firstLabel} camera…`;
+      const shot1 = drawFrameToCanvas(video, video.classList.contains('mirror'), rotation, buildFilterCss());
+      const shot1Facing = currentFacingMode;
+
+      const otherFacing = currentFacingMode === 'environment' ? 'user' : 'environment';
+      const secondLabel = otherFacing === 'environment' ? 'back' : 'front';
+      mixStatus.textContent = `Switching to ${secondLabel} camera…`;
+      await startCamera(undefined, otherFacing);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      mixStatus.textContent = `Capturing ${secondLabel} camera…`;
+      const shot2 = drawFrameToCanvas(video, video.classList.contains('mirror'), rotation, buildFilterCss());
+
+      mixShots.front = shot1Facing === 'environment' ? shot2 : shot1;
+      mixShots.back = shot1Facing === 'environment' ? shot1 : shot2;
+
+      // restore whichever camera was active before the mix flow started
+      await startCamera(undefined, originalFacingMode);
+
+      mixStatus.textContent = 'Adjust the blend and layout, then save.';
+      mixLayoutSelect.style.display = 'block';
+      mixBlendRow.style.display = 'flex';
+      mixSaveBtn.style.display = 'inline-block';
+      renderMixPreview();
+    } catch (err) {
+      mixStatus.textContent = `Could not capture both cameras: ${err.message}`;
+    }
   }
 
   startBtn.addEventListener('click', () => startCamera(cameraSelect.value || undefined));
@@ -460,6 +788,28 @@
   clearSnapsBtn.addEventListener('click', (e) => {
     e.preventDefault();
     snapshotsEl.innerHTML = '';
+  });
+
+  rotateBtn.addEventListener('click', cycleRotation);
+  adjustBtn.addEventListener('click', () => adjustPanel.classList.toggle('open'));
+  resetFiltersBtn.addEventListener('click', () => applyPreset('normal'));
+  [brightnessSlider, contrastSlider, saturateSlider, hueSlider].forEach((el) =>
+    el.addEventListener('input', onFilterSliderInput)
+  );
+  document.querySelectorAll('#adjustPanel .preset-row button[data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+  });
+
+  mixBtn.addEventListener('click', startMixFlow);
+  mixCancelBtn.addEventListener('click', () => mixOverlay.classList.add('hidden'));
+  mixLayoutSelect.addEventListener('change', renderMixPreview);
+  mixBlendSlider.addEventListener('input', () => {
+    mixBlendValue.textContent = mixBlendSlider.value + '%';
+    renderMixPreview();
+  });
+  mixSaveBtn.addEventListener('click', () => {
+    addSnapshot(mixCanvas.toDataURL('image/png'));
+    mixOverlay.classList.add('hidden');
   });
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
