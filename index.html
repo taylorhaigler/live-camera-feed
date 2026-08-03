@@ -60,6 +60,69 @@
     overflow: hidden;
     border: 1px solid #23242a;
   }
+  body.fs-mode {
+    overflow: hidden;
+  }
+  body.fs-mode .app > h1,
+  body.fs-mode .app > div:last-child {
+    display: none;
+  }
+  body.fs-mode .app {
+    width: 100vw;
+    max-width: 100vw;
+    gap: 0;
+  }
+  body.fs-mode .stage {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+    z-index: 1000;
+  }
+  body.fs-mode .stage video {
+    object-fit: contain;
+  }
+  body.fs-mode .controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1001;
+    margin: 0;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(8px);
+  }
+  .exit-fs {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1002;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(4px);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  body.fs-mode .exit-fs {
+    display: flex;
+  }
+  body.fs-mode .badge,
+  body.fs-mode .clock {
+    top: calc(12px + env(safe-area-inset-top));
+  }
+  body.fs-mode .exit-fs {
+    top: calc(12px + env(safe-area-inset-top));
+  }
   video {
     width: 100%;
     height: 100%;
@@ -196,6 +259,7 @@
       </div>
       <div class="badge" id="liveBadge" style="display:none;">● LIVE</div>
       <div class="clock" id="clock" style="display:none;">--:--:--</div>
+      <button class="exit-fs" id="exitFsBtn" title="Exit fullscreen">✕</button>
     </div>
 
     <div class="controls">
@@ -204,6 +268,7 @@
       <button id="flipBtn" disabled>🔄 Flip Camera</button>
       <select id="cameraSelect" disabled></select>
       <button id="snapBtn" disabled>📸 Snapshot</button>
+      <button id="fullscreenBtn" disabled>⛶ Fullscreen</button>
       <div class="spacer"></div>
       <span class="status" id="status"></span>
     </div>
@@ -225,6 +290,9 @@
   const stopBtn = document.getElementById('stopBtn');
   const snapBtn = document.getElementById('snapBtn');
   const flipBtn = document.getElementById('flipBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const exitFsBtn = document.getElementById('exitFsBtn');
+  const stage = document.getElementById('stage');
   const cameraSelect = document.getElementById('cameraSelect');
   const statusEl = document.getElementById('status');
   const liveDot = document.getElementById('liveDot');
@@ -252,8 +320,32 @@
     stopBtn.disabled = !isLive;
     snapBtn.disabled = !isLive;
     flipBtn.disabled = !isLive;
+    fullscreenBtn.disabled = !isLive;
     cameraSelect.disabled = !isLive || !multipleCamerasAvailable;
+    if (!isLive) exitFullscreenMode();
   }
+
+  async function enterFullscreenMode() {
+    document.body.classList.add('fs-mode');
+    if (stage.requestFullscreen) {
+      try { await stage.requestFullscreen(); } catch (err) { /* fall back to CSS-only fullscreen */ }
+    } else if (stage.webkitRequestFullscreen) {
+      try { stage.webkitRequestFullscreen(); } catch (err) { /* fall back to CSS-only fullscreen */ }
+    }
+  }
+
+  function exitFullscreenMode() {
+    document.body.classList.remove('fs-mode');
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (document.webkitFullscreenElement) {
+      document.webkitExitFullscreen();
+    }
+  }
+
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) document.body.classList.remove('fs-mode');
+  });
 
   function tickClock() {
     clockEl.textContent = new Date().toLocaleTimeString();
@@ -363,6 +455,8 @@
   cameraSelect.addEventListener('change', () => {
     if (currentStream) startCamera(cameraSelect.value);
   });
+  fullscreenBtn.addEventListener('click', enterFullscreenMode);
+  exitFsBtn.addEventListener('click', exitFullscreenMode);
   clearSnapsBtn.addEventListener('click', (e) => {
     e.preventDefault();
     snapshotsEl.innerHTML = '';
